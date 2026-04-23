@@ -31,9 +31,10 @@ for donor in "${DONORS[@]}"; do
   prefix="${base_prefix}_leiden_${PARAM_TAG}"
   sample_path="$AIRR_DIR/${donor}_15_${SAMPLE_REPLICA}.tsv"
   background_path="$AIRR_DIR/${donor}_0_${BACKGROUND_REPLICA}.tsv"
+  embedding_run_dir="$RUNS_DIR/$base_prefix"
   run_dir="$RUNS_DIR/${base_prefix}_leiden_${PARAM_TAG}"
-  sample_embedding_path="$run_dir/${base_prefix}_sample_embeddings.parquet"
-  background_embedding_path="$run_dir/${base_prefix}_background_embeddings.parquet"
+  sample_embedding_path="$embedding_run_dir/${base_prefix}_sample_embeddings.parquet"
+  background_embedding_path="$embedding_run_dir/${base_prefix}_background_embeddings.parquet"
 
   if [[ ! -f "$sample_path" ]]; then
     sample_path="$AIRR_DIR/${donor}_15_${SAMPLE_REPLICA}.txt"
