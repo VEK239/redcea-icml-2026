@@ -222,9 +222,41 @@ def save_cluster_members(
 
 
 def run_tcrdist3(args: argparse.Namespace) -> None:
+    valid_genes: set[str] | None = None
     from tcrdist.repertoire import TCRrep
+    try:
+        from tcrdist.all_genes import all_genes
+
+        valid_genes = set(all_genes["human"].keys())
+    except Exception:
+        valid_genes = None
 
     input_df = pd.read_csv(args.input, sep="\t").copy()
+    input_df = input_df.dropna(subset=["cdr3aa", "v.segm", "j.segm"]).copy()
+    input_df["cdr3aa"] = input_df["cdr3aa"].astype(str).str.strip()
+    input_df["v.segm"] = input_df["v.segm"].astype(str).str.strip()
+    input_df["j.segm"] = input_df["j.segm"].astype(str).str.strip()
+
+    # tcrdist3 cannot handle rows whose V/J genes are not present in its reference
+    # database; they later surface as None values during sparse distance building.
+    # Filter aggressively to canonical IMGT-looking beta-chain names with alleles.
+    valid_gene_pattern = r"^TRB[VDJ][A-Z0-9/-]*\*\d+$"
+    mask = (
+        input_df["cdr3aa"].ne("")
+        & input_df["v.segm"].str.match(valid_gene_pattern, na=False)
+        & input_df["j.segm"].str.match(valid_gene_pattern, na=False)
+    )
+    if valid_genes is not None:
+        mask &= input_df["v.segm"].isin(valid_genes) & input_df["j.segm"].isin(valid_genes)
+    filtered_out = int((~mask).sum())
+    if filtered_out:
+        print(f"Filtered out {filtered_out} rows before tcrdist3 due to missing/non-canonical V/J annotations")
+    input_df = input_df[mask].reset_index(drop=True)
+    if input_df.empty:
+        save_cluster_members(input_df, {}, args.output, dataset_name=args.dataset_name, method="tcrdist3")
+        print(f"Saved {args.output}")
+        return
+
     tcrdist_df = (
         input_df.rename(
             columns={
