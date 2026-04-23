@@ -22,41 +22,26 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 
 mkdir -p "$TOOLS_DIR"
 
-PKG_MGR="conda"
-SOLVER_ARGS=()
-CHANNEL_ARGS=(--override-channels -c conda-forge)
-CONDA_PACKAGES=(
-  "python=${PYTHON_VERSION}"
-  pip
-  openjdk
-  perl
-  numpy
-  pandas
-  scipy
-  scikit-learn
-  biopython
-  numba
-  cython
-  faiss-cpu
-)
-
-if command -v mamba >/dev/null 2>&1; then
-  PKG_MGR="mamba"
-elif conda create --help 2>/dev/null | grep -q -- "--solver"; then
-  SOLVER_ARGS=(--solver libmamba)
-fi
-
 if ! conda env list | awk '{print $1}' | grep -Fxq "$ENV_NAME"; then
-  "$PKG_MGR" create -y -n "$ENV_NAME" "${SOLVER_ARGS[@]}" "${CHANNEL_ARGS[@]}" "${CONDA_PACKAGES[@]}"
+  conda create -y -n "$ENV_NAME" "python=${PYTHON_VERSION}" pip openjdk
 else
-  "$PKG_MGR" install -y -n "$ENV_NAME" "${SOLVER_ARGS[@]}" "${CHANNEL_ARGS[@]}" "${CONDA_PACKAGES[@]}"
+  conda install -y -n "$ENV_NAME" "python=${PYTHON_VERSION}" pip openjdk
 fi
 
 conda activate "$ENV_NAME"
 
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install "git+https://github.com/antigenomics/redcea"
-python -m pip install tcrdist3
+python -m pip install \
+  numpy \
+  pandas \
+  scipy \
+  scikit-learn \
+  biopython \
+  numba \
+  cython \
+  faiss-cpu \
+  tcrdist3 \
+  "git+https://github.com/antigenomics/redcea"
 
 if [[ ! -d "$TOOLS_DIR/GIANA" ]]; then
   git clone https://github.com/s175573/GIANA.git "$TOOLS_DIR/GIANA"
