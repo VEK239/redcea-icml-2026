@@ -1,4 +1,4 @@
-gene	cdr3aa	v.segm	j.segm	cid	antigen.epitope	method	dataset_name
+﻿gene	cdr3aa	v.segm	j.segm	cid	antigen.epitope	method	dataset_name
 TRB	AKNIQYF	TRBV4-1*01	TRBJ2-4*01	H.B.1	GPGHKARVL	tcrdist3	ALL
 TRB	CASSQ	TRBV4-3*01	TRBJ2-1*01	H.B.1	KRWIILGLNK	tcrdist3	ALL
 TRB	CASSQ	TRBV4-3*01	TRBJ2-7*01	H.B.1	KRWIIMGLNK	tcrdist3	ALL

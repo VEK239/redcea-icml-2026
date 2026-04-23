@@ -375,9 +375,10 @@ def compute_metrics(y_true: pd.Series, y_pred: pd.Series) -> dict[str, float | i
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        "tp": tp,
-        "fp": fp,
-        "fn": fn,
+        "true_positive": tp,
+        "false_positive": fp,
+        "false_negative": fn,
+        "true_negative": int((~y_true & ~y_pred).sum()),
         "predicted_positive": int(y_pred.sum()),
         "true_positive_total": int(y_true.sum()),
     }
@@ -400,16 +401,15 @@ def evaluate(args: argparse.Namespace) -> None:
 
         for epitope, short_name in EPITOPES:
             truth_ep = truth[truth["epitope_aa"].eq(epitope)].copy()
-            cluster_ids = set(members.loc[members["antigen.epitope"].eq(epitope), "cid"].dropna().astype(str))
-            cluster_scope = members[members["cid"].astype(str).isin(cluster_ids)].copy()
+            members_ep = members[members["antigen.epitope"].eq(epitope)].copy()
 
-            cdr3_signatures = set(cluster_scope["cdr3aa"].astype(str))
+            cdr3_signatures = set(members_ep["cdr3aa"].astype(str))
             vj_signatures = set(
-                cluster_scope["cdr3aa"].astype(str)
+                members_ep["cdr3aa"].astype(str)
                 + "|"
-                + cluster_scope["v.segm"].astype(str)
+                + members_ep["v.segm"].astype(str)
                 + "|"
-                + cluster_scope["j.segm"].astype(str)
+                + members_ep["j.segm"].astype(str)
             )
 
             beta_key = truth_ep["cdr3_beta_aa"].fillna("").astype(str)
@@ -424,10 +424,10 @@ def evaluate(args: argparse.Namespace) -> None:
                         "method": method_dir.name,
                         "epitope": epitope,
                         "epitope_short": short_name,
-                        "n_clusters": int(len(cluster_ids)),
-                        "cluster_member_total": int(len(cluster_scope)),
-                        "cluster_member_target_epitope": int(cluster_scope["antigen.epitope"].eq(epitope).sum()),
-                        "cluster_member_other_epitope": int(cluster_scope["antigen.epitope"].ne(epitope).sum()),
+                        "n_clusters": int(members_ep["cid"].astype(str).nunique()),
+                        "cluster_member_total": int(len(members_ep)),
+                        "cluster_member_target_epitope": int(len(members_ep)),
+                        "cluster_member_other_epitope": 0,
                         "match_mode": "cdr3+vj" if with_vj else "cdr3",
                         "total": int(len(truth_ep)),
                         "positives": int(truth_ep["valid"].sum()),
@@ -437,13 +437,19 @@ def evaluate(args: argparse.Namespace) -> None:
 
     detailed = pd.DataFrame(rows).sort_values(["method", "match_mode", "epitope_short"]).reset_index(drop=True)
     summary = (
-        detailed.groupby(["method", "match_mode"], as_index=False)
+        detailed.groupby(["method", "match_mode"])
         .agg(
             mean_precision=("precision", "mean"),
             mean_recall=("recall", "mean"),
             mean_f1=("f1", "mean"),
             min_f1=("f1", "min"),
+            total_true_positive=("true_positive", "sum"),
+            total_false_positive=("false_positive", "sum"),
+            total_false_negative=("false_negative", "sum"),
+            total_true_negative=("true_negative", "sum"),
+            total_predicted_positive=("predicted_positive", "sum"),
         )
+        .reset_index()
         .sort_values(["mean_f1", "mean_precision", "mean_recall"], ascending=False)
         .reset_index(drop=True)
     )
