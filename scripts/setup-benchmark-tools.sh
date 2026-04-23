@@ -32,16 +32,21 @@ conda activate "$ENV_NAME"
 conda install -y -c conda-forge \
   openjdk perl \
   numpy pandas scipy scikit-learn biopython numba cython faiss-cpu \
-  r-remotes
+  r-remotes r-data.table r-ggplot2 r-gridextra r-viridis r-htmlwidgets \
+  r-visnetwork r-igraph r-stringr r-dplyr r-tibble r-tidyselect r-pillar \
+  r-vctrs r-glue r-scales r-gtable r-bslib r-sass r-matrix
 
 python -m pip install --upgrade pip setuptools wheel
+python -m pip install "git+https://github.com/antigenomics/redcea"
 python -m pip install tcrdist3
 
 if [[ ! -d "$TOOLS_DIR/GIANA" ]]; then
   git clone https://github.com/s175573/GIANA.git "$TOOLS_DIR/GIANA"
 fi
 
-Rscript -e "remotes::install_github('HetzDra/turboGliph', upgrade = 'never')"
+# Preinstall the main CRAN/Bioconductor-side R stack via conda-forge so the
+# GitHub package install does not have to compile a deep dependency tree.
+Rscript -e "remotes::install_github('HetzDra/turboGliph', upgrade = 'never', dependencies = FALSE)"
 
 if [[ ! -f "$TOOLS_DIR/vdjtools-1.2.1/vdjtools-1.2.1.jar" ]]; then
   curl -L https://github.com/mikessh/vdjtools/releases/download/1.2.1/vdjtools-1.2.1.zip -o "$TOOLS_DIR/vdjtools-1.2.1.zip"
@@ -56,12 +61,14 @@ Activate environment:
   conda activate $ENV_NAME
 
 Installed:
+  redcea                  -> Python package
   tcrdist3                -> Python package
   GIANA                   -> $TOOLS_DIR/GIANA
   GLIPH2 (turboGliph)     -> R package
   TCRNet / VDJtools       -> $TOOLS_DIR/vdjtools-1.2.1/vdjtools-1.2.1.jar
 
 Examples:
+  python -c "import redcea; print('redcea ok')"
   python -c "import tcrdist; print('tcrdist3 ok')"
   python "$TOOLS_DIR/GIANA/GIANA4.1.py" -h
   Rscript -e "library(turboGliph)"
