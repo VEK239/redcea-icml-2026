@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 ENV_NAME="${1:-redcea-benchmark}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
