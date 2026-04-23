@@ -38,12 +38,13 @@ def parse_args() -> argparse.Namespace:
         help="Only copy files whose basename starts with this prefix.",
     )
     parser.add_argument(
-        "--method",
-        choices=("leiden", "vdbscan"),
-        required=True,
+        "--default-method",
+        choices=("vdbscan",),
+        default="vdbscan",
         help=(
-            "Clustering method label for this result set. It is appended to copied "
-            "filenames so different methods can coexist inside the project."
+            "Method label to assign to files that do not already contain an explicit "
+            "method token in their basename. In the current server layout, bare "
+            "yfv_* files correspond to vdbscan outputs."
         ),
     )
     parser.add_argument(
@@ -63,6 +64,14 @@ def iter_candidate_files(source: Path, prefix: str) -> list[Path]:
     return sorted(set(matches))
 
 
+def detect_method_from_name(name: str, default_method: str) -> str:
+    if "_leiden_" in name:
+        return "leiden"
+    if "_vdbscan_" in name:
+        return "vdbscan"
+    return default_method
+
+
 def add_method_to_name(name: str, method: str) -> str:
     suffixes = (
         "_summary_tcrempnet.tsv",
@@ -77,7 +86,8 @@ def add_method_to_name(name: str, method: str) -> str:
     return f"{Path(name).stem}_{method}{Path(name).suffix}"
 
 
-def copy_file(src: Path, dest_dir: Path, overwrite: bool, method: str) -> str:
+def copy_file(src: Path, dest_dir: Path, overwrite: bool, default_method: str) -> str:
+    method = detect_method_from_name(src.name, default_method=default_method)
     dest = dest_dir / add_method_to_name(src.name, method=method)
     if dest.exists():
         same = filecmp.cmp(src, dest, shallow=False)
@@ -113,17 +123,22 @@ def main() -> int:
     dest.mkdir(parents=True, exist_ok=True)
     copied = 0
     skipped = 0
+    methods_seen: dict[str, int] = {}
 
     for src in files:
-        message = copy_file(src, dest, overwrite=args.overwrite, method=args.method)
+        method = detect_method_from_name(src.name, default_method=args.default_method)
+        message = copy_file(src, dest, overwrite=args.overwrite, default_method=args.default_method)
         print(message)
+        methods_seen[method] = methods_seen.get(method, 0) + 1
         if message.startswith("copy"):
             copied += 1
         else:
             skipped += 1
 
     print()
-    print(f"Imported {copied} {args.method} files into {dest}")
+    method_summary = ", ".join(f"{method}={count}" for method, count in sorted(methods_seen.items()))
+    print(f"Imported {copied} files into {dest}")
+    print(f"Detected methods: {method_summary}")
     print(f"Skipped {skipped} already identical files")
     return 0
 
