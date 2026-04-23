@@ -140,18 +140,10 @@ def prepare_inputs(args: argparse.Namespace) -> None:
         ep_df = df[df["antigen.epitope"].eq(epitope)].copy().reset_index(drop=True)
         generic_path = input_root / "generic" / f"{short_name}.tsv"
         giana_path = input_root / "giana" / f"{short_name}.tsv"
-        gliph2_path = input_root / "gliph2" / f"{short_name}.tsv"
-        tcrnet_target = input_root / "tcrnet" / "targets" / f"{short_name}.txt"
-        tcrnet_bg = input_root / "tcrnet" / "backgrounds" / f"{short_name}.txt"
 
         generic_path.parent.mkdir(parents=True, exist_ok=True)
         ep_df.to_csv(generic_path, sep="\t", index=False)
-        ep_df.to_csv(gliph2_path, sep="\t", index=False)
         write_giana_input(ep_df, giana_path)
-        write_vdjtools_input(ep_df, tcrnet_target)
-
-        bg_df = df[df["antigen.epitope"].ne(epitope)].copy().reset_index(drop=True)
-        write_vdjtools_input(bg_df, tcrnet_bg)
 
     print(f"Prepared inputs in {input_root}")
     print(f"Saved truth table to {args.work_dir / 'truth_glc_ylq.csv'}")
