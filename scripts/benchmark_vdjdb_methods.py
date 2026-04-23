@@ -7,6 +7,7 @@ import math
 import subprocess
 from collections import defaultdict
 from pathlib import Path
+from io import StringIO
 
 import pandas as pd
 
@@ -16,6 +17,7 @@ EPITOPES = [
     ("YLQPRTFLL", "YLQ"),
 ]
 PADJ_THRESHOLD = 1e-5
+ALL_DATASET_NAME = "ALL"
 
 
 def normalize_segment(series: pd.Series, *, drop_allele: bool = True) -> pd.Series:
@@ -25,15 +27,12 @@ def normalize_segment(series: pd.Series, *, drop_allele: bool = True) -> pd.Seri
     return normalized
 
 
-def load_vdjdb(path: Path, *, species: str, gene: str, epitopes: list[str]) -> pd.DataFrame:
+def load_vdjdb(path: Path, *, species: str, gene: str, epitopes: list[str] | None = None) -> pd.DataFrame:
     df = pd.read_csv(path, sep="\t").copy()
-    df = df[
-        df["species"].eq(species)
-        & df["gene"].eq(gene)
-        & df["antigen.epitope"].isin(epitopes)
-        & df["v.segm"].fillna("").ne("")
-        & df["j.segm"].fillna("").ne("")
-    ].copy()
+    mask = df["species"].eq(species) & df["gene"].eq(gene) & df["v.segm"].fillna("").ne("") & df["j.segm"].fillna("").ne("")
+    if epitopes is not None:
+        mask &= df["antigen.epitope"].isin(epitopes)
+    df = df[mask].copy()
     df["cdr3aa"] = df["cdr3"].astype(str)
     # Keep allele annotations for method inputs such as tcrdist3, which expects
     # IMGT-style gene names like TRBV29-1*01 in its reference database.
@@ -81,6 +80,25 @@ def write_giana_input(df: pd.DataFrame, output_path: Path) -> None:
         writer.writerows(rows)
 
 
+def load_giana_output(path: Path) -> pd.DataFrame:
+    valid_lines: list[str] = []
+    with path.open() as handle:
+        for line in handle:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            parts = stripped.split("\t")
+            if len(parts) < 4:
+                continue
+            valid_lines.append(stripped)
+    if not valid_lines:
+        return pd.DataFrame(columns=["cdr3aa", "cluster", "v.segm", "j.segm"])
+    raw = pd.read_csv(StringIO("\n".join(valid_lines)), sep="\t", header=None)
+    if raw.shape[1] < 4:
+        raise ValueError(f"Unexpected GIANA output shape after filtering: {raw.shape}")
+    return raw
+
+
 def mock_back_translate(seq: str) -> str:
     codons = {
         "A": "GCT",
@@ -126,21 +144,19 @@ def write_vdjtools_input(df: pd.DataFrame, output_path: Path) -> None:
 
 def prepare_inputs(args: argparse.Namespace) -> None:
     epitopes = [ep for ep, _ in EPITOPES]
-    df = load_vdjdb(args.vdjdb, species=args.species, gene=args.gene, epitopes=epitopes)
+    df = load_vdjdb(args.vdjdb, species=args.species, gene=args.gene)
     truth = load_truth(args.truth, epitopes=epitopes)
 
     input_root = args.work_dir / "inputs"
     input_root.mkdir(parents=True, exist_ok=True)
     truth.to_csv(args.work_dir / "truth_glc_ylq.csv", index=False)
 
-    for epitope, short_name in EPITOPES:
-        ep_df = df[df["antigen.epitope"].eq(epitope)].copy().reset_index(drop=True)
-        generic_path = input_root / "generic" / f"{short_name}.tsv"
-        giana_path = input_root / "giana" / f"{short_name}.tsv"
+    generic_path = input_root / "generic" / f"{ALL_DATASET_NAME}.tsv"
+    giana_path = input_root / "giana" / f"{ALL_DATASET_NAME}.tsv"
 
-        generic_path.parent.mkdir(parents=True, exist_ok=True)
-        ep_df.to_csv(generic_path, sep="\t", index=False)
-        write_giana_input(ep_df, giana_path)
+    generic_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(generic_path, sep="\t", index=False)
+    write_giana_input(df, giana_path)
 
     print(f"Prepared inputs in {input_root}")
     print(f"Saved truth table to {args.work_dir / 'truth_glc_ylq.csv'}")
@@ -182,10 +198,10 @@ def save_cluster_members(
     cluster_map: dict[int, str],
     output_path: Path,
     *,
-    short_name: str,
+    dataset_name: str,
     method: str,
 ) -> None:
-    columns = ["gene", "cdr3aa", "v.segm", "j.segm", "cid", "antigen.epitope", "method", "epitope_short"]
+    columns = ["gene", "cdr3aa", "v.segm", "j.segm", "cid", "antigen.epitope", "method", "dataset_name"]
     rows = []
     for idx, cid in cluster_map.items():
         row = input_df.iloc[idx]
@@ -198,7 +214,7 @@ def save_cluster_members(
                 "cid": cid,
                 "antigen.epitope": row["antigen.epitope"],
                 "method": method,
-                "epitope_short": short_name,
+                "dataset_name": dataset_name,
             }
         )
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -209,20 +225,24 @@ def run_tcrdist3(args: argparse.Namespace) -> None:
     from tcrdist.repertoire import TCRrep
 
     input_df = pd.read_csv(args.input, sep="\t").copy()
-    short_name = args.short_name
-    epitope = input_df["antigen.epitope"].iat[0]
-
-    tr = TCRrep(
-        cell_df=input_df.rename(
+    tcrdist_df = (
+        input_df.rename(
             columns={
                 "cdr3aa": "cdr3_b_aa",
                 "v.segm": "v_b_gene",
                 "j.segm": "j_b_gene",
             }
-        )[["cdr3_b_aa", "v_b_gene", "j_b_gene"]],
+        )[["cdr3_b_aa", "v_b_gene", "j_b_gene"]]
+        .copy()
+    )
+    tcrdist_df["count"] = 1
+
+    tr = TCRrep(
+        cell_df=tcrdist_df,
         organism="human",
         chains=["beta"],
         db_file=args.db_file,
+        deduplicate=False,
     )
     matrix = pd.DataFrame(tr.pw_beta)
 
@@ -238,20 +258,18 @@ def run_tcrdist3(args: argparse.Namespace) -> None:
     for comp in connected_components(len(input_df), edges):
         if len(comp) < args.min_cluster_size:
             continue
-        cid = f"H.B.{epitope}.{cid_counter}"
+        cid = f"H.B.{cid_counter}"
         cid_counter += 1
         for idx in comp:
             cluster_map[idx] = cid
 
-    save_cluster_members(input_df, cluster_map, args.output, short_name=short_name, method="tcrdist3")
+    save_cluster_members(input_df, cluster_map, args.output, dataset_name=args.dataset_name, method="tcrdist3")
     print(f"Saved {args.output}")
 
 
 def convert_giana(args: argparse.Namespace) -> None:
     input_df = pd.read_csv(args.input, sep="\t").copy()
-    raw = pd.read_csv(args.giana_output, sep="\t", header=None)
-    if raw.shape[1] < 4:
-        raise ValueError(f"Unexpected GIANA output shape: {raw.shape}")
+    raw = load_giana_output(args.giana_output)
 
     raw = raw.rename(columns={0: "cdr3aa", 1: "cluster", 2: "v.segm", 3: "j.segm"})
     raw["cluster"] = raw["cluster"].astype(str)
@@ -260,14 +278,13 @@ def convert_giana(args: argparse.Namespace) -> None:
     keep = set(counts[counts >= args.min_cluster_size].index)
 
     cluster_map: dict[int, str] = {}
-    epitope = input_df["antigen.epitope"].iat[0]
     for idx, row in valid.iterrows():
         cluster_id = row["cluster"]
         if cluster_id not in keep:
             continue
-        cluster_map[idx] = f"H.B.{epitope}.{cluster_id}"
+        cluster_map[idx] = f"H.B.{cluster_id}"
 
-    save_cluster_members(input_df, cluster_map, args.output, short_name=args.short_name, method="GIANA")
+    save_cluster_members(input_df, cluster_map, args.output, dataset_name=args.dataset_name, method="GIANA")
     print(f"Saved {args.output}")
 
 
@@ -295,18 +312,17 @@ def convert_tcrnet(args: argparse.Namespace) -> None:
     comps = connected_components(len(expanded_nodes), [(index_remap[a], index_remap[b]) for a, b in edge_set])
 
     cluster_map: dict[int, str] = {}
-    epitope = input_df["antigen.epitope"].iat[0]
     cid_counter = 1
     for comp in comps:
         original = [expanded_nodes[idx] for idx in comp]
         if len(original) < args.min_cluster_size:
             continue
-        cid = f"H.B.{epitope}.{cid_counter}"
+        cid = f"H.B.{cid_counter}"
         cid_counter += 1
         for idx in original:
             cluster_map[idx] = cid
 
-    save_cluster_members(input_df, cluster_map, args.output, short_name=args.short_name, method="TCRnet")
+    save_cluster_members(input_df, cluster_map, args.output, dataset_name=args.dataset_name, method="TCRnet")
     print(f"Saved {args.output}")
 
 
@@ -348,15 +364,16 @@ def evaluate(args: argparse.Namespace) -> None:
 
         for epitope, short_name in EPITOPES:
             truth_ep = truth[truth["epitope_aa"].eq(epitope)].copy()
-            members_ep = members[members["antigen.epitope"].eq(epitope)].copy()
+            cluster_ids = set(members.loc[members["antigen.epitope"].eq(epitope), "cid"].dropna().astype(str))
+            cluster_scope = members[members["cid"].astype(str).isin(cluster_ids)].copy()
 
-            cdr3_signatures = set(members_ep["cdr3aa"].astype(str))
+            cdr3_signatures = set(cluster_scope["cdr3aa"].astype(str))
             vj_signatures = set(
-                members_ep["cdr3aa"].astype(str)
+                cluster_scope["cdr3aa"].astype(str)
                 + "|"
-                + members_ep["v.segm"].astype(str)
+                + cluster_scope["v.segm"].astype(str)
                 + "|"
-                + members_ep["j.segm"].astype(str)
+                + cluster_scope["j.segm"].astype(str)
             )
 
             beta_key = truth_ep["cdr3_beta_aa"].fillna("").astype(str)
@@ -371,6 +388,10 @@ def evaluate(args: argparse.Namespace) -> None:
                         "method": method_dir.name,
                         "epitope": epitope,
                         "epitope_short": short_name,
+                        "n_clusters": int(len(cluster_ids)),
+                        "cluster_member_total": int(len(cluster_scope)),
+                        "cluster_member_target_epitope": int(cluster_scope["antigen.epitope"].eq(epitope).sum()),
+                        "cluster_member_other_epitope": int(cluster_scope["antigen.epitope"].ne(epitope).sum()),
                         "match_mode": "cdr3+vj" if with_vj else "cdr3",
                         "total": int(len(truth_ep)),
                         "positives": int(truth_ep["valid"].sum()),
@@ -416,23 +437,23 @@ def parse_args() -> argparse.Namespace:
     tcrdist_parser = subparsers.add_parser("run-tcrdist3")
     tcrdist_parser.add_argument("--input", type=Path, required=True)
     tcrdist_parser.add_argument("--output", type=Path, required=True)
-    tcrdist_parser.add_argument("--short-name", required=True)
+    tcrdist_parser.add_argument("--dataset-name", default=ALL_DATASET_NAME)
     tcrdist_parser.add_argument("--radius", type=int, default=24)
     tcrdist_parser.add_argument("--min-cluster-size", type=int, default=3)
-    tcrdist_parser.add_argument("--db-file", default="combo_xcr_2024-03-05.tsv")
+    tcrdist_parser.add_argument("--db-file", default="alphabeta_gammadelta_db.tsv")
 
     giana_parser = subparsers.add_parser("convert-giana")
     giana_parser.add_argument("--input", type=Path, required=True)
     giana_parser.add_argument("--giana-output", type=Path, required=True)
     giana_parser.add_argument("--output", type=Path, required=True)
-    giana_parser.add_argument("--short-name", required=True)
+    giana_parser.add_argument("--dataset-name", default=ALL_DATASET_NAME)
     giana_parser.add_argument("--min-cluster-size", type=int, default=3)
 
     tcrnet_parser = subparsers.add_parser("convert-tcrnet")
     tcrnet_parser.add_argument("--input", type=Path, required=True)
     tcrnet_parser.add_argument("--annotated", type=Path, required=True)
     tcrnet_parser.add_argument("--output", type=Path, required=True)
-    tcrnet_parser.add_argument("--short-name", required=True)
+    tcrnet_parser.add_argument("--dataset-name", default=ALL_DATASET_NAME)
     tcrnet_parser.add_argument("--min-cluster-size", type=int, default=5)
     tcrnet_parser.add_argument("--min-degree", type=int, default=2)
     tcrnet_parser.add_argument("--pvalue-threshold", type=float, default=0.05)

@@ -18,8 +18,7 @@ GIANA_HOME="${GIANA_HOME:-$TOOLS_DIR/GIANA}"
 TCRDIST3_RADIUS="${TCRDIST3_RADIUS:-24}"
 TCRDIST3_MIN_CLUSTER_SIZE="${TCRDIST3_MIN_CLUSTER_SIZE:-3}"
 GIANA_MIN_CLUSTER_SIZE="${GIANA_MIN_CLUSTER_SIZE:-3}"
-
-SHORTS=("GLC" "YLQ")
+DATASET_NAME="${DATASET_NAME:-ALL}"
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -62,69 +61,25 @@ python scripts/benchmark_vdjdb_methods.py prepare \
 
 if [[ " $METHODS " == *" tcrdist3 "* ]]; then
   mkdir -p "$RESULTS_DIR/tcrdist3"
-  for short_name in "${SHORTS[@]}"; do
-    python scripts/benchmark_vdjdb_methods.py run-tcrdist3 \
-      --input "$WORK_DIR/inputs/generic/${short_name}.tsv" \
-      --output "$RESULTS_DIR/tcrdist3/${short_name}.txt" \
-      --short-name "$short_name" \
-      --radius "$TCRDIST3_RADIUS" \
-      --min-cluster-size "$TCRDIST3_MIN_CLUSTER_SIZE"
-  done
-  python - <<PY
-from pathlib import Path
-import pandas as pd
-root = Path(r"$RESULTS_DIR") / "tcrdist3"
-parts = []
-columns = ["gene", "cdr3aa", "v.segm", "j.segm", "cid", "antigen.epitope", "method", "epitope_short"]
-for short in ["GLC", "YLQ"]:
-    path = root / f"{short}.txt"
-    if path.exists():
-        try:
-            parts.append(pd.read_csv(path, sep="\t"))
-        except pd.errors.EmptyDataError:
-            pass
-out = root / "cluster_members_TRB.txt"
-if parts:
-    pd.concat(parts, ignore_index=True).to_csv(out, sep="\t", index=False)
-else:
-    pd.DataFrame(columns=columns).to_csv(out, sep="\t", index=False)
-print(f"Saved {out}")
-PY
+  python scripts/benchmark_vdjdb_methods.py run-tcrdist3 \
+    --input "$WORK_DIR/inputs/generic/${DATASET_NAME}.tsv" \
+    --output "$RESULTS_DIR/tcrdist3/cluster_members_TRB.txt" \
+    --dataset-name "$DATASET_NAME" \
+    --radius "$TCRDIST3_RADIUS" \
+    --min-cluster-size "$TCRDIST3_MIN_CLUSTER_SIZE"
 fi
 
 if [[ " $METHODS " == *" giana "* ]]; then
   mkdir -p "$RESULTS_DIR/giana" "$WORK_DIR/giana_raw"
-  for short_name in "${SHORTS[@]}"; do
-    input_path="$WORK_DIR/inputs/giana/${short_name}.tsv"
-    raw_output="$WORK_DIR/giana_raw/${short_name}.txt"
-    python "$GIANA_HOME/GIANA4.1.py" -f "$input_path" -O "$raw_output"
-    python scripts/benchmark_vdjdb_methods.py convert-giana \
-      --input "$WORK_DIR/inputs/generic/${short_name}.tsv" \
-      --giana-output "$raw_output" \
-      --output "$RESULTS_DIR/giana/${short_name}.txt" \
-      --short-name "$short_name" \
-      --min-cluster-size "$GIANA_MIN_CLUSTER_SIZE"
-  done
-  python - <<PY
-from pathlib import Path
-import pandas as pd
-root = Path(r"$RESULTS_DIR") / "giana"
-parts = []
-columns = ["gene", "cdr3aa", "v.segm", "j.segm", "cid", "antigen.epitope", "method", "epitope_short"]
-for short in ["GLC", "YLQ"]:
-    path = root / f"{short}.txt"
-    if path.exists():
-        try:
-            parts.append(pd.read_csv(path, sep="\t"))
-        except pd.errors.EmptyDataError:
-            pass
-out = root / "cluster_members_TRB.txt"
-if parts:
-    pd.concat(parts, ignore_index=True).to_csv(out, sep="\t", index=False)
-else:
-    pd.DataFrame(columns=columns).to_csv(out, sep="\t", index=False)
-print(f"Saved {out}")
-PY
+  input_path="$WORK_DIR/inputs/giana/${DATASET_NAME}.tsv"
+  raw_output="$WORK_DIR/giana_raw/${DATASET_NAME}.txt"
+  python "$GIANA_HOME/GIANA4.1.py" -f "$input_path" -O "$raw_output"
+  python scripts/benchmark_vdjdb_methods.py convert-giana \
+    --input "$WORK_DIR/inputs/generic/${DATASET_NAME}.tsv" \
+    --giana-output "$raw_output" \
+    --output "$RESULTS_DIR/giana/cluster_members_TRB.txt" \
+    --dataset-name "$DATASET_NAME" \
+    --min-cluster-size "$GIANA_MIN_CLUSTER_SIZE"
 fi
 
 python scripts/benchmark_vdjdb_methods.py evaluate \
