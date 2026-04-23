@@ -243,15 +243,19 @@ def run_tcrdist3(args: argparse.Namespace) -> None:
         chains=["beta"],
         db_file=args.db_file,
         deduplicate=False,
+        compute_distances=False,
     )
-    matrix = pd.DataFrame(tr.pw_beta)
+    tr.cpus = args.cpus
+    tr.compute_sparse_rect_distances(radius=args.radius, chunk_size=args.chunk_size)
+    sparse = tr.rw_beta.tocoo()
 
     edges: list[tuple[int, int]] = []
-    for i in range(len(matrix)):
-        for j in range(i + 1, len(matrix)):
-            value = matrix.iat[i, j]
-            if value <= args.radius:
-                edges.append((i, j))
+    for i, j, value in zip(sparse.row, sparse.col, sparse.data):
+        if i >= j:
+            continue
+        # In tcrdist3 sparse matrices, exact zero distances are encoded as -1.
+        if value == -1 or value <= args.radius:
+            edges.append((int(i), int(j)))
 
     cluster_map: dict[int, str] = {}
     cid_counter = 1
@@ -441,6 +445,8 @@ def parse_args() -> argparse.Namespace:
     tcrdist_parser.add_argument("--radius", type=int, default=24)
     tcrdist_parser.add_argument("--min-cluster-size", type=int, default=3)
     tcrdist_parser.add_argument("--db-file", default="alphabeta_gammadelta_db.tsv")
+    tcrdist_parser.add_argument("--cpus", type=int, default=1)
+    tcrdist_parser.add_argument("--chunk-size", type=int, default=100)
 
     giana_parser = subparsers.add_parser("convert-giana")
     giana_parser.add_argument("--input", type=Path, required=True)

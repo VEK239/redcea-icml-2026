@@ -17,6 +17,8 @@ GIANA_HOME="${GIANA_HOME:-$TOOLS_DIR/GIANA}"
 
 TCRDIST3_RADIUS="${TCRDIST3_RADIUS:-24}"
 TCRDIST3_MIN_CLUSTER_SIZE="${TCRDIST3_MIN_CLUSTER_SIZE:-3}"
+TCRDIST3_CPUS="${TCRDIST3_CPUS:-4}"
+TCRDIST3_CHUNK_SIZE="${TCRDIST3_CHUNK_SIZE:-100}"
 GIANA_MIN_CLUSTER_SIZE="${GIANA_MIN_CLUSTER_SIZE:-3}"
 DATASET_NAME="${DATASET_NAME:-ALL}"
 
@@ -66,6 +68,8 @@ if [[ " $METHODS " == *" tcrdist3 "* ]]; then
     --output "$RESULTS_DIR/tcrdist3/cluster_members_TRB.txt" \
     --dataset-name "$DATASET_NAME" \
     --radius "$TCRDIST3_RADIUS" \
+    --cpus "$TCRDIST3_CPUS" \
+    --chunk-size "$TCRDIST3_CHUNK_SIZE" \
     --min-cluster-size "$TCRDIST3_MIN_CLUSTER_SIZE"
 fi
 
