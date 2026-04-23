@@ -23,18 +23,50 @@ source "$(conda info --base)/etc/profile.d/conda.sh"
 
 mkdir -p "$TOOLS_DIR"
 
+PKG_MGR="conda"
+SOLVER_ARGS=()
+CHANNEL_ARGS=(--override-channels -c conda-forge)
+CONDA_PACKAGES=(
+  "python=${PYTHON_VERSION}"
+  "r-base=${R_VERSION}"
+  pip
+  openjdk
+  perl
+  numpy
+  pandas
+  scipy
+  scikit-learn
+  biopython
+  numba
+  cython
+  faiss-cpu
+  r-remotes
+  r-data.table
+  r-stringdist
+  r-dplyr
+  r-igraph
+  r-visnetwork
+  r-grr
+  r-viridis
+  r-plotfunctions
+  r-stringr
+  r-doparallel
+  r-foreach
+)
+
+if command -v mamba >/dev/null 2>&1; then
+  PKG_MGR="mamba"
+elif conda create --help 2>/dev/null | grep -q -- "--solver"; then
+  SOLVER_ARGS=(--solver libmamba)
+fi
+
 if ! conda env list | awk '{print $1}' | grep -Fxq "$ENV_NAME"; then
-  conda create -y -n "$ENV_NAME" "python=${PYTHON_VERSION}" "r-base=${R_VERSION}" pip
+  "$PKG_MGR" create -y -n "$ENV_NAME" "${SOLVER_ARGS[@]}" "${CHANNEL_ARGS[@]}" "${CONDA_PACKAGES[@]}"
+else
+  "$PKG_MGR" install -y -n "$ENV_NAME" "${SOLVER_ARGS[@]}" "${CHANNEL_ARGS[@]}" "${CONDA_PACKAGES[@]}"
 fi
 
 conda activate "$ENV_NAME"
-
-conda install -y -c conda-forge \
-  openjdk perl \
-  numpy pandas scipy scikit-learn biopython numba cython faiss-cpu \
-  r-remotes r-data.table r-ggplot2 r-gridextra r-viridis r-htmlwidgets \
-  r-visnetwork r-igraph r-stringr r-dplyr r-tibble r-tidyselect r-pillar \
-  r-vctrs r-glue r-scales r-gtable r-bslib r-sass r-matrix
 
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install "git+https://github.com/antigenomics/redcea"
