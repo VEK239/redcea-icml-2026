@@ -18,16 +18,11 @@ EPITOPES = [
 PADJ_THRESHOLD = 1e-5
 
 
-def normalize_segment(series: pd.Series) -> pd.Series:
-    return (
-        series.fillna("")
-        .astype(str)
-        .str.split(",")
-        .str[0]
-        .str.strip()
-        .str.split("*")
-        .str[0]
-    )
+def normalize_segment(series: pd.Series, *, drop_allele: bool = True) -> pd.Series:
+    normalized = series.fillna("").astype(str).str.split(",").str[0].str.strip()
+    if drop_allele:
+        normalized = normalized.str.split("*").str[0]
+    return normalized
 
 
 def load_vdjdb(path: Path, *, species: str, gene: str, epitopes: list[str]) -> pd.DataFrame:
@@ -40,8 +35,10 @@ def load_vdjdb(path: Path, *, species: str, gene: str, epitopes: list[str]) -> p
         & df["j.segm"].fillna("").ne("")
     ].copy()
     df["cdr3aa"] = df["cdr3"].astype(str)
-    df["v.segm"] = normalize_segment(df["v.segm"])
-    df["j.segm"] = normalize_segment(df["j.segm"])
+    # Keep allele annotations for method inputs such as tcrdist3, which expects
+    # IMGT-style gene names like TRBV29-1*01 in its reference database.
+    df["v.segm"] = normalize_segment(df["v.segm"], drop_allele=False)
+    df["j.segm"] = normalize_segment(df["j.segm"], drop_allele=False)
     return (
         df[
             [
