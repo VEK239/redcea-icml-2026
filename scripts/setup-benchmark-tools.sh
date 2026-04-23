@@ -3,7 +3,6 @@ set -eo pipefail
 
 ENV_NAME="${1:-redcea-benchmark}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
-R_VERSION="${R_VERSION:-4.3}"
 TOOLS_DIR="${TOOLS_DIR:-$PWD/tools}"
 
 require_cmd() {
@@ -28,7 +27,6 @@ SOLVER_ARGS=()
 CHANNEL_ARGS=(--override-channels -c conda-forge)
 CONDA_PACKAGES=(
   "python=${PYTHON_VERSION}"
-  "r-base=${R_VERSION}"
   pip
   openjdk
   perl
@@ -40,18 +38,6 @@ CONDA_PACKAGES=(
   numba
   cython
   faiss-cpu
-  r-remotes
-  r-data.table
-  r-stringdist
-  r-dplyr
-  r-igraph
-  r-visnetwork
-  r-grr
-  r-viridis
-  r-plotfunctions
-  r-stringr
-  r-doparallel
-  r-foreach
 )
 
 if command -v mamba >/dev/null 2>&1; then
@@ -76,10 +62,6 @@ if [[ ! -d "$TOOLS_DIR/GIANA" ]]; then
   git clone https://github.com/s175573/GIANA.git "$TOOLS_DIR/GIANA"
 fi
 
-# Preinstall the main CRAN/Bioconductor-side R stack via conda-forge so the
-# GitHub package install does not have to compile a deep dependency tree.
-Rscript -e "remotes::install_github('HetzDra/turboGliph', upgrade = 'never', dependencies = FALSE)"
-
 if [[ ! -f "$TOOLS_DIR/vdjtools-1.2.1/vdjtools-1.2.1.jar" ]]; then
   curl -L https://github.com/mikessh/vdjtools/releases/download/1.2.1/vdjtools-1.2.1.zip -o "$TOOLS_DIR/vdjtools-1.2.1.zip"
   unzip -o "$TOOLS_DIR/vdjtools-1.2.1.zip" -d "$TOOLS_DIR" >/dev/null
@@ -96,13 +78,11 @@ Installed:
   redcea                  -> Python package
   tcrdist3                -> Python package
   GIANA                   -> $TOOLS_DIR/GIANA
-  GLIPH2 (turboGliph)     -> R package
   TCRNet / VDJtools       -> $TOOLS_DIR/vdjtools-1.2.1/vdjtools-1.2.1.jar
 
 Examples:
   python -c "import redcea; print('redcea ok')"
   python -c "import tcrdist; print('tcrdist3 ok')"
   python "$TOOLS_DIR/GIANA/GIANA4.1.py" -h
-  Rscript -e "library(turboGliph)"
   java -jar "$TOOLS_DIR/vdjtools-1.2.1/vdjtools-1.2.1.jar" CalcDegreeStats -h
 EOF
