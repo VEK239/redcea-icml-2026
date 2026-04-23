@@ -2,7 +2,7 @@
 set -eo pipefail
 
 ENV_NAME="${1:-redcea-benchmark}"
-PYTHON_VERSION="${PYTHON_VERSION:-3.10}"
+PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
 R_VERSION="${R_VERSION:-4.3}"
 TOOLS_DIR="${TOOLS_DIR:-$PWD/tools}"
 
