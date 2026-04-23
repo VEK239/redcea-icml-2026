@@ -22,10 +22,13 @@ BACKGROUND_REPLICA="${BACKGROUND_REPLICA:-F1}"
 mkdir -p "$OUT_DIR" "$RUNS_DIR" "$LOG_DIR"
 
 for donor in "${DONORS[@]}"; do
-  prefix="yfv_${donor}_${SAMPLE_REPLICA}"
+  base_prefix="yfv_${donor}_${SAMPLE_REPLICA}"
+  prefix="${base_prefix}_leiden"
   sample_path="$AIRR_DIR/${donor}_15_${SAMPLE_REPLICA}.tsv"
   background_path="$AIRR_DIR/${donor}_0_${BACKGROUND_REPLICA}.tsv"
-  run_dir="$RUNS_DIR/$prefix"
+  run_dir="$RUNS_DIR/$base_prefix"
+  sample_embedding_path="$run_dir/${base_prefix}_sample_embeddings.parquet"
+  background_embedding_path="$run_dir/${base_prefix}_background_embeddings.parquet"
 
   if [[ ! -f "$sample_path" ]]; then
     sample_path="$AIRR_DIR/${donor}_15_${SAMPLE_REPLICA}.txt"
@@ -40,6 +43,14 @@ for donor in "${DONORS[@]}"; do
   fi
   if [[ ! -f "$background_path" ]]; then
     echo "Skipping ${donor}: background AIRR file not found" >&2
+    continue
+  fi
+  if [[ ! -f "$sample_embedding_path" ]]; then
+    echo "Skipping ${donor}: sample embeddings not found at ${sample_embedding_path}" >&2
+    continue
+  fi
+  if [[ ! -f "$background_embedding_path" ]]; then
+    echo "Skipping ${donor}: background embeddings not found at ${background_embedding_path}" >&2
     continue
   fi
 
@@ -62,8 +73,13 @@ redcea \\
   -o $(printf '%q' "$run_dir") \\
   -e $(printf '%q' "$prefix") \\
   -c $(printf '%q' "$CHAIN") \\
-  -np $(printf '%q' "$NPROC")
+  -np $(printf '%q' "$NPROC") \\
+  -se $(printf '%q' "$sample_embedding_path") \\
+  -be $(printf '%q' "$background_embedding_path") \\
+  --cluster-algo leiden
 
-find $(printf '%q' "$run_dir") -maxdepth 1 -type f -name $(printf '%q' "${prefix}_*") -exec cp -f {} $(printf '%q' "$OUT_DIR/") \;
+cp -f $(printf '%q' "$run_dir/${prefix}_tcremp_clusters.tsv") $(printf '%q' "$OUT_DIR/")
+cp -f $(printf '%q' "$run_dir/${prefix}_summary_tcrempnet.tsv") $(printf '%q' "$OUT_DIR/")
+cp -f $(printf '%q' "$run_dir/${prefix}_enriched_clonotypes_tcremp.tsv") $(printf '%q' "$OUT_DIR/")
 EOF
 done
