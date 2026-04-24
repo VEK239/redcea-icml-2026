@@ -39,12 +39,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--default-method",
-        choices=("vdbscan",),
+        choices=("dbscan", "vdbscan"),
         default="vdbscan",
         help=(
             "Method label to assign to files that do not already contain an explicit "
             "method token in their basename. In the current server layout, bare "
-            "yfv_* files correspond to vdbscan outputs."
+            "yfv_* files may correspond to legacy dbscan outputs or newer vdbscan outputs."
         ),
     )
     parser.add_argument(
@@ -67,6 +67,8 @@ def iter_candidate_files(source: Path, prefix: str) -> list[Path]:
 def detect_method_from_name(name: str, default_method: str) -> str:
     if "_leiden_" in name:
         return "leiden"
+    if "_dbscan_" in name:
+        return "dbscan"
     if "_vdbscan_" in name:
         return "vdbscan"
     return default_method
@@ -79,7 +81,7 @@ def add_method_to_name(name: str, method: str) -> str:
         "_tcremp_clusters.tsv",
     )
     for suffix in suffixes:
-        if name.endswith(f"_{method}{suffix}"):
+        if name.endswith(f"_{method}{suffix}") or f"_{method}_" in name[: -len(suffix)]:
             return name
         if name.endswith(suffix):
             return f"{name[:-len(suffix)]}_{method}{suffix}"
