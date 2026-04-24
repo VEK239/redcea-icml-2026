@@ -198,21 +198,44 @@ def plot_volcano(df: pd.DataFrame, sample_name: str, pval_threshold: float, fold
         "no": "#FFFFB2",
     }
     markers = {True: "s", False: "o"}
+    label_order = ["sign_vdjdb", "sign", "vdjdb", "no"]
+    non_vdjdb_df = df.loc[~df["vdjdb"]]
+    vdjdb_df = df.loc[df["vdjdb"]]
 
-    sns.scatterplot(
-        data=df,
-        x="log_fold_change",
-        y="log10_pval",
-        hue="label",
-        style="vdjdb",
-        palette=colors,
-        markers=markers,
-        edgecolor="black",
-        linewidth=0.3,
-        s=70,
-        alpha=0.85,
-        ax=ax,
-    )
+    if not non_vdjdb_df.empty:
+        sns.scatterplot(
+            data=non_vdjdb_df,
+            x="log_fold_change",
+            y="log10_pval",
+            hue="label",
+            hue_order=label_order,
+            style="vdjdb",
+            palette=colors,
+            markers=markers,
+            edgecolor="black",
+            linewidth=0.25,
+            s=45,
+            alpha=0.45,
+            ax=ax,
+            legend=vdjdb_df.empty,
+        )
+
+    if not vdjdb_df.empty:
+        sns.scatterplot(
+            data=vdjdb_df,
+            x="log_fold_change",
+            y="log10_pval",
+            hue="label",
+            hue_order=label_order,
+            style="vdjdb",
+            palette=colors,
+            markers=markers,
+            edgecolor="black",
+            linewidth=0.3,
+            s=70,
+            alpha=0.85,
+            ax=ax,
+        )
 
     sig_mask = df["enrichment_fdr_zbinom"] < pval_threshold
     adj_pval = float(df.loc[sig_mask, "enrichment_pvalue_zbinom"].max()) if sig_mask.any() else pval_threshold
