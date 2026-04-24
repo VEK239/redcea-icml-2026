@@ -10,9 +10,14 @@ import pandas as pd
 SUMMARY_SUFFIX = "_summary_tcrempnet.tsv"
 CLUSTERS_SUFFIX = "_tcremp_clusters.tsv"
 ENRICHED_SUFFIX = "_enriched_clonotypes_tcremp.tsv"
-RUN_RE = re.compile(
+LEIDEN_RUN_RE = re.compile(
     r"^yfv_(?P<donor>[A-Z]\d+)_(?P<replica>F\d+)_leiden_"
     r"k(?P<k_neighbors>\d+)_res(?P<resolution>[A-Za-z0-9p.-]+)_min(?P<min_samples>\d+)$"
+)
+VDBSCAN_RUN_RE = re.compile(
+    r"^yfv_(?P<donor>[A-Z]\d+)_(?P<replica>F\d+)_vdbscan_"
+    r"k(?P<k_neighbors>\d+)_ek(?P<eps_k_neighbors>\d+)_min(?P<min_samples>\d+)"
+    r"_eps(?P<eps_estimation_based_on>[A-Za-z0-9_-]+)_sym(?P<vdbscan_sym_rule>[A-Za-z0-9_-]+)$"
 )
 CDR3_CANDIDATES = ("cdr3aa_beta", "junction_aa", "cdr3", "cdr3aa", "cdr3_b_aa", "cdr3_beta")
 
@@ -29,8 +34,8 @@ def parse_args() -> argparse.Namespace:
     root = find_repo_root()
     parser = argparse.ArgumentParser(
         description=(
-            "Summarize all YFV Leiden run directories against VDJdb LLW clonotypes. "
-            "Computes exact-CDR3 overlap in enriched clonotypes and per-cluster LLW metrics."
+            "Summarize YFV run directories against VDJdb LLW clonotypes. "
+            "Supports both Leiden and vDBSCAN run naming schemes."
         )
     )
     parser.add_argument(
@@ -60,6 +65,16 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.05,
         help="FDR threshold used to define enriched vs not enriched.",
+    )
+    parser.add_argument(
+        "--donors",
+        default="",
+        help="Optional comma-separated donor filter, e.g. S1,Q1",
+    )
+    parser.add_argument(
+        "--algos",
+        default="",
+        help="Optional comma-separated algo filter, e.g. vdbscan or leiden,vdbscan",
     )
     parser.add_argument(
         "--output-prefix",
@@ -94,6 +109,48 @@ def parse_resolution(tag: str) -> float:
     return float(tag.replace("p", "."))
 
 
+def parse_run_name(run_name: str) -> dict[str, object] | None:
+    match = LEIDEN_RUN_RE.match(run_name)
+    if match is not None:
+        return {
+            "cluster_algo": "leiden",
+            "donor": match.group("donor"),
+            "replica": match.group("replica"),
+            "k_neighbors": int(match.group("k_neighbors")),
+            "cluster_min_samples": int(match.group("min_samples")),
+            "leiden_resolution": parse_resolution(match.group("resolution")),
+            "resolution_tag": match.group("resolution"),
+            "eps_k_neighbors": None,
+            "eps_estimation_based_on": None,
+            "vdbscan_sym_rule": None,
+            "param_id": (
+                f"leiden|k{match.group('k_neighbors')}|res{match.group('resolution')}|"
+                f"min{match.group('min_samples')}"
+            ),
+        }
+
+    match = VDBSCAN_RUN_RE.match(run_name)
+    if match is not None:
+        return {
+            "cluster_algo": "vdbscan",
+            "donor": match.group("donor"),
+            "replica": match.group("replica"),
+            "k_neighbors": int(match.group("k_neighbors")),
+            "cluster_min_samples": int(match.group("min_samples")),
+            "leiden_resolution": None,
+            "resolution_tag": None,
+            "eps_k_neighbors": int(match.group("eps_k_neighbors")),
+            "eps_estimation_based_on": match.group("eps_estimation_based_on"),
+            "vdbscan_sym_rule": match.group("vdbscan_sym_rule"),
+            "param_id": (
+                f"vdbscan|k{match.group('k_neighbors')}|ek{match.group('eps_k_neighbors')}|"
+                f"min{match.group('min_samples')}|eps{match.group('eps_estimation_based_on')}|"
+                f"sym{match.group('vdbscan_sym_rule')}"
+            ),
+        }
+    return None
+
+
 def load_llw_vdjdb(vdjdb_path: Path, *, epitope: str, species: str) -> pd.DataFrame:
     vdjdb = pd.read_csv(vdjdb_path, sep="\t")
     mask = (
@@ -111,20 +168,31 @@ def load_llw_vdjdb(vdjdb_path: Path, *, epitope: str, species: str) -> pd.DataFr
     return llw
 
 
-def discover_run_dirs(runs_root: Path) -> list[Path]:
+def discover_run_dirs(
+    runs_root: Path,
+    *,
+    donors_filter: set[str] | None,
+    algos_filter: set[str] | None,
+) -> list[tuple[Path, dict[str, object]]]:
     if not runs_root.exists():
         raise FileNotFoundError(f"Runs root does not exist: {runs_root}")
 
-    run_dirs: list[Path] = []
+    run_dirs: list[tuple[Path, dict[str, object]]] = []
     for path in sorted(runs_root.iterdir()):
         if not path.is_dir():
             continue
-        if RUN_RE.match(path.name) is None:
+        parsed = parse_run_name(path.name)
+        if parsed is None:
+            continue
+        if donors_filter is not None and str(parsed["donor"]) not in donors_filter:
+            continue
+        if algos_filter is not None and str(parsed["cluster_algo"]) not in algos_filter:
             continue
         if any(path.glob(f"*{SUMMARY_SUFFIX}")):
-            run_dirs.append(path)
+            run_dirs.append((path, parsed))
+
     if not run_dirs:
-        raise FileNotFoundError(f"No YFV Leiden run directories found under {runs_root}")
+        raise FileNotFoundError(f"No matching YFV run directories found under {runs_root}")
     return run_dirs
 
 
@@ -142,6 +210,7 @@ def classify_zone(fdr: float, logfc: float, *, fdr_threshold: float) -> str:
 
 def summarize_run(
     run_dir: Path,
+    run_meta: dict[str, object],
     *,
     llw_vdjdb: pd.DataFrame,
     fdr_threshold: float,
@@ -155,10 +224,6 @@ def summarize_run(
         raise FileNotFoundError(f"Clusters file not found for {run_dir.name}: {clusters_path}")
     if not enriched_path.exists():
         raise FileNotFoundError(f"Enriched clonotypes file not found for {run_dir.name}: {enriched_path}")
-
-    match = RUN_RE.match(run_dir.name)
-    if match is None:
-        raise ValueError(f"Run directory does not match expected pattern: {run_dir.name}")
 
     summary_df = pd.read_csv(summary_path, sep="\t")
     clusters_df = pd.read_csv(clusters_path, sep="\t")
@@ -188,16 +253,10 @@ def summarize_run(
     ]
     zone_counts = vdjdb_cluster_summary["zone"].value_counts().to_dict()
 
-    return {
+    result = {
         "run_dir": str(run_dir),
         "run_name": run_dir.name,
         "prefix": prefix,
-        "donor": match.group("donor"),
-        "replica": match.group("replica"),
-        "k_neighbors": int(match.group("k_neighbors")),
-        "leiden_resolution": parse_resolution(match.group("resolution")),
-        "resolution_tag": match.group("resolution"),
-        "cluster_min_samples": int(match.group("min_samples")),
         "n_clusters_total": int(summary_df["cluster_id"].nunique()),
         "mean_cluster_size": float(summary_df["cluster_size"].mean()),
         "median_cluster_size": float(summary_df["cluster_size"].median()),
@@ -220,10 +279,32 @@ def summarize_run(
         "llw_vdjdb_clusters_not_enriched_positive": int(zone_counts.get("not_enriched_positive", 0)),
         "llw_vdjdb_clusters_not_enriched_negative": int(zone_counts.get("not_enriched_negative", 0)),
     }
+    result.update(run_meta)
+    return result
 
 
 def build_param_summary(detailed: pd.DataFrame) -> pd.DataFrame:
-    group_cols = ["k_neighbors", "leiden_resolution", "resolution_tag", "cluster_min_samples"]
+    detailed = detailed.copy()
+    for column, fill_value in [
+        ("leiden_resolution", "NA"),
+        ("resolution_tag", "NA"),
+        ("eps_k_neighbors", "NA"),
+        ("eps_estimation_based_on", "NA"),
+        ("vdbscan_sym_rule", "NA"),
+    ]:
+        detailed[column] = detailed[column].where(pd.notna(detailed[column]), fill_value)
+
+    group_cols = [
+        "cluster_algo",
+        "k_neighbors",
+        "cluster_min_samples",
+        "leiden_resolution",
+        "resolution_tag",
+        "eps_k_neighbors",
+        "eps_estimation_based_on",
+        "vdbscan_sym_rule",
+        "param_id",
+    ]
     summary = (
         detailed.groupby(group_cols)
         .agg(
@@ -257,17 +338,25 @@ def build_param_summary(detailed: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def parse_filter_list(raw: str) -> set[str] | None:
+    values = [item.strip() for item in raw.split(",") if item.strip()]
+    return set(values) if values else None
+
+
 def main() -> None:
     args = parse_args()
     llw_vdjdb = load_llw_vdjdb(args.vdjdb, epitope=args.epitope, species=args.species)
-    run_dirs = discover_run_dirs(args.runs_root)
+    donors_filter = parse_filter_list(args.donors)
+    algos_filter = parse_filter_list(args.algos)
+    run_dirs = discover_run_dirs(args.runs_root, donors_filter=donors_filter, algos_filter=algos_filter)
 
     rows = [
-        summarize_run(run_dir, llw_vdjdb=llw_vdjdb, fdr_threshold=args.fdr_threshold)
-        for run_dir in run_dirs
+        summarize_run(run_dir, run_meta, llw_vdjdb=llw_vdjdb, fdr_threshold=args.fdr_threshold)
+        for run_dir, run_meta in run_dirs
     ]
     detailed = pd.DataFrame(rows).sort_values(
-        ["donor", "k_neighbors", "leiden_resolution", "cluster_min_samples"]
+        ["cluster_algo", "donor", "k_neighbors", "leiden_resolution", "eps_k_neighbors", "cluster_min_samples"],
+        na_position="last",
     ).reset_index(drop=True)
     summary = build_param_summary(detailed)
 
