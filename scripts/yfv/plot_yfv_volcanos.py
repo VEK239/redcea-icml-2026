@@ -14,8 +14,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-SUMMARY_SUFFIX = "_summary_tcrempnet.tsv"
-CLONOTYPES_SUFFIX = "_enriched_clonotypes_tcremp.tsv"
+SUMMARY_SUFFIXES = ("_summary_tcrempnet.tsv", "_summary_tcrempnet.tsv.gz")
+CLONOTYPES_SUFFIXES = (
+    "_tcremp_clusters.tsv",
+    "_tcremp_clusters.tsv.gz",
+    "_enriched_clonotypes_tcremp.tsv",
+    "_enriched_clonotypes_tcremp.tsv.gz",
+)
 KNOWN_METHODS = ("leiden", "vdbscan")
 
 
@@ -81,15 +86,20 @@ def load_yfv_cdr3s(vdjdb_path: Path) -> set[str]:
 
 def infer_sample_label(summary_path: Path, prefix: str) -> str:
     name = summary_path.name
-    if not name.startswith(prefix) or not name.endswith(SUMMARY_SUFFIX):
+    summary_suffix = next((suffix for suffix in SUMMARY_SUFFIXES if name.endswith(suffix)), None)
+    if not name.startswith(prefix) or summary_suffix is None:
         return summary_path.stem
-    core = name[len(prefix) : -len(SUMMARY_SUFFIX)]
+    core = name[len(prefix) : -len(summary_suffix)]
     core = re.sub(r"_(leiden|vdbscan)$", "", core)
     return core
 
 
 def infer_method(summary_path: Path) -> str:
-    stem = summary_path.name[: -len(SUMMARY_SUFFIX)]
+    stem = summary_path.name
+    for suffix in SUMMARY_SUFFIXES:
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
     for method in KNOWN_METHODS:
         if stem.endswith(f"_{method}"):
             return method
@@ -97,8 +107,15 @@ def infer_method(summary_path: Path) -> str:
 
 
 def find_clonotypes_file(summary_path: Path) -> Path:
-    expected = summary_path.with_name(summary_path.name.replace(SUMMARY_SUFFIX, CLONOTYPES_SUFFIX))
-    return expected
+    for summary_suffix in SUMMARY_SUFFIXES:
+        if not summary_path.name.endswith(summary_suffix):
+            continue
+        prefix = summary_path.name[: -len(summary_suffix)]
+        for clonotypes_suffix in CLONOTYPES_SUFFIXES:
+            expected = summary_path.with_name(f"{prefix}{clonotypes_suffix}")
+            if expected.exists():
+                return expected
+    return summary_path.with_name(summary_path.stem)
 
 
 def resolve_cdr3_column(df: pd.DataFrame) -> str | None:
@@ -272,10 +289,14 @@ def main() -> int:
         raise FileNotFoundError(f"VDJdb file does not exist: {vdjdb_path}")
 
     summary_paths = sorted(
-        path for path in input_dir.glob(f"{args.prefix}*{SUMMARY_SUFFIX}") if path.is_file()
+        path
+        for suffix in SUMMARY_SUFFIXES
+        for path in input_dir.glob(f"{args.prefix}*{suffix}")
+        if path.is_file()
     )
     if not summary_paths:
-        print(f"No summary files matching {args.prefix}*{SUMMARY_SUFFIX} were found in {input_dir}")
+        expected = ", ".join(f"{args.prefix}*{suffix}" for suffix in SUMMARY_SUFFIXES)
+        print(f"No summary files matching [{expected}] were found in {input_dir}")
         return 1
 
     output_dir.mkdir(parents=True, exist_ok=True)
