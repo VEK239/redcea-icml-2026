@@ -21,7 +21,7 @@ CLONOTYPES_SUFFIXES = (
     "_enriched_clonotypes_tcremp.tsv",
     "_enriched_clonotypes_tcremp.tsv.gz",
 )
-KNOWN_METHODS = ("leiden", "vdbscan")
+KNOWN_METHODS = ("dbscan", "leiden", "vdbscan")
 
 
 def parse_args() -> argparse.Namespace:
@@ -90,7 +90,7 @@ def infer_sample_label(summary_path: Path, prefix: str) -> str:
     if not name.startswith(prefix) or summary_suffix is None:
         return summary_path.stem
     core = name[len(prefix) : -len(summary_suffix)]
-    core = re.sub(r"_(leiden|vdbscan)$", "", core)
+    core = re.sub(r"_(dbscan|leiden|vdbscan)$", "", core)
     return core
 
 
@@ -100,8 +100,8 @@ def infer_method(summary_path: Path) -> str:
         if stem.endswith(suffix):
             stem = stem[: -len(suffix)]
             break
-    for method in KNOWN_METHODS:
-        if stem.endswith(f"_{method}"):
+    for method in sorted(KNOWN_METHODS, key=len, reverse=True):
+        if stem.endswith(f"_{method}") or f"_{method}_" in stem:
             return method
     return "unknown"
 
@@ -241,7 +241,10 @@ def process_sample(
     title = sample_label if method == "unknown" else f"{sample_label} [{method}]"
     plot_volcano(volcano_df, sample_name=title, pval_threshold=pval_threshold, fold_threshold=fold_threshold, ax=ax)
     fig.tight_layout()
-    base_name = sample_label if method == "unknown" else f"{sample_label}_{method}"
+    if method == "unknown" or sample_label.endswith(f"_{method}") or f"_{method}_" in sample_label:
+        base_name = sample_label
+    else:
+        base_name = f"{sample_label}_{method}"
     fig.savefig(output_dir / f"{base_name}_volcano.png", dpi=200, bbox_inches="tight")
     fig.savefig(output_dir / f"{base_name}_volcano.svg", bbox_inches="tight")
     plt.close(fig)

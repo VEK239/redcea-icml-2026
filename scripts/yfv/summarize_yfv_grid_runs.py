@@ -14,6 +14,10 @@ LEIDEN_RUN_RE = re.compile(
     r"^yfv_(?P<donor>[A-Z]\d+)_(?P<replica>F\d+)_leiden_"
     r"k(?P<k_neighbors>\d+)_res(?P<resolution>[A-Za-z0-9p.-]+)_min(?P<min_samples>\d+)$"
 )
+DBSCAN_RUN_RE = re.compile(
+    r"^yfv_(?P<donor>[A-Z]\d+)_(?P<replica>F\d+)_dbscan_"
+    r"k(?P<k_neighbors>\d+)_ek(?P<eps_k_neighbors>\d+)_min(?P<min_samples>\d+)$"
+)
 VDBSCAN_RUN_RE = re.compile(
     r"^yfv_(?P<donor>[A-Z]\d+)_(?P<replica>F\d+)_vdbscan_"
     r"k(?P<k_neighbors>\d+)_ek(?P<eps_k_neighbors>\d+)_min(?P<min_samples>\d+)"
@@ -35,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Summarize YFV run directories against VDJdb LLW clonotypes. "
-            "Supports both Leiden and vDBSCAN run naming schemes."
+            "Supports Leiden, DBSCAN, and vDBSCAN run naming schemes."
         )
     )
     parser.add_argument(
@@ -74,7 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--algos",
         default="",
-        help="Optional comma-separated algo filter, e.g. vdbscan or leiden,vdbscan",
+        help="Optional comma-separated algo filter, e.g. dbscan or leiden,dbscan,vdbscan",
     )
     parser.add_argument(
         "--output-prefix",
@@ -125,6 +129,25 @@ def parse_run_name(run_name: str) -> dict[str, object] | None:
             "vdbscan_sym_rule": None,
             "param_id": (
                 f"leiden|k{match.group('k_neighbors')}|res{match.group('resolution')}|"
+                f"min{match.group('min_samples')}"
+            ),
+        }
+
+    match = DBSCAN_RUN_RE.match(run_name)
+    if match is not None:
+        return {
+            "cluster_algo": "dbscan",
+            "donor": match.group("donor"),
+            "replica": match.group("replica"),
+            "k_neighbors": int(match.group("k_neighbors")),
+            "cluster_min_samples": int(match.group("min_samples")),
+            "leiden_resolution": None,
+            "resolution_tag": None,
+            "eps_k_neighbors": int(match.group("eps_k_neighbors")),
+            "eps_estimation_based_on": None,
+            "vdbscan_sym_rule": None,
+            "param_id": (
+                f"dbscan|k{match.group('k_neighbors')}|ek{match.group('eps_k_neighbors')}|"
                 f"min{match.group('min_samples')}"
             ),
         }

@@ -15,28 +15,54 @@ PARTITION="${PARTITION:-short}"
 CONSTRAINT="${CONSTRAINT:-hpc}"
 NPROC="${NPROC:-16}"
 CHAIN="${CHAIN:-TRB}"
-DONORS=(${DONORS:-P1 P2 Q2 S2})
+DONORS=(${DONORS:-Q1 Q2 P1 P2 S1 S2})
 SAMPLE_REPLICA="${SAMPLE_REPLICA:-F1}"
 BACKGROUND_REPLICA="${BACKGROUND_REPLICA:-F1}"
-K_NEIGHBORS="${K_NEIGHBORS:-30}"
-CLUSTER_MIN_SAMPLES="${CLUSTER_MIN_SAMPLES:-3}"
 
-EPS_K_NEIGHBORS="${EPS_K_NEIGHBORS:-20}"
-EPS_ESTIMATION_BASED_ON="${EPS_ESTIMATION_BASED_ON:-sample}"
-VDBSCAN_SYM_RULE="${VDBSCAN_SYM_RULE:-asymmetric}"
-PARAM_TAG="${PARAM_TAG:-k${K_NEIGHBORS}_ek${EPS_K_NEIGHBORS}_min${CLUSTER_MIN_SAMPLES}_eps_${EPS_ESTIMATION_BASED_ON}}"
+CLUSTER_ALGO="${CLUSTER_ALGO:-dbscan}"
+K_NEIGHBORS="${K_NEIGHBORS:-4}"
+EPS_K_NEIGHBORS="${EPS_K_NEIGHBORS:-4}"
+CLUSTER_MIN_SAMPLES="${CLUSTER_MIN_SAMPLES:-3}"
+LEIDEN_RESOLUTION="${LEIDEN_RESOLUTION:-2.0}"
+
+case "$CLUSTER_ALGO" in
+  dbscan)
+    PARAM_TAG="${PARAM_TAG:-k${K_NEIGHBORS}_ek${EPS_K_NEIGHBORS}_min${CLUSTER_MIN_SAMPLES}}"
+    ;;
+  leiden)
+    RESOLUTION_TAG="${RESOLUTION_TAG:-${LEIDEN_RESOLUTION//./p}}"
+    PARAM_TAG="${PARAM_TAG:-k${K_NEIGHBORS}_res${RESOLUTION_TAG}_min${CLUSTER_MIN_SAMPLES}}"
+    ;;
+  *)
+    echo "Unsupported CLUSTER_ALGO=${CLUSTER_ALGO}. Use dbscan or leiden." >&2
+    exit 1
+    ;;
+esac
+
 
 mkdir -p "$OUT_DIR" "$RUNS_DIR" "$LOG_DIR"
 
 for donor in "${DONORS[@]}"; do
   base_prefix="yfv_${donor}_${SAMPLE_REPLICA}"
-  prefix="${base_prefix}_vdbscan_${PARAM_TAG}"
+  prefix="${base_prefix}_${CLUSTER_ALGO}_${PARAM_TAG}"
   sample_path="$AIRR_DIR/${donor}_15_${SAMPLE_REPLICA}.tsv"
   background_path="$AIRR_DIR/${donor}_0_${BACKGROUND_REPLICA}.tsv"
   embedding_run_dir="$RUNS_DIR/$base_prefix"
-  run_dir="$RUNS_DIR/${base_prefix}_vdbscan_${PARAM_TAG}"
+  run_dir="$RUNS_DIR/${base_prefix}_${CLUSTER_ALGO}_${PARAM_TAG}"
   sample_embedding_path="$embedding_run_dir/${base_prefix}_sample_embeddings.parquet"
   background_embedding_path="$embedding_run_dir/${base_prefix}_background_embeddings.parquet"
+
+  cluster_args=(
+    --cluster-algo "$CLUSTER_ALGO"
+    -kn "$K_NEIGHBORS"
+    -ms "$CLUSTER_MIN_SAMPLES"
+  )
+  if [[ "$CLUSTER_ALGO" == "dbscan" ]]; then
+    cluster_args+=(-ekn "$EPS_K_NEIGHBORS")
+  elif [[ "$CLUSTER_ALGO" == "leiden" ]]; then
+    cluster_args+=(--leiden-resolution "$LEIDEN_RESOLUTION")
+  fi
+  cluster_args_escaped=$(printf '%q ' "${cluster_args[@]}")
 
   if [[ ! -f "$sample_path" ]]; then
     sample_path="$AIRR_DIR/${donor}_15_${SAMPLE_REPLICA}.txt"
@@ -84,12 +110,7 @@ redcea \\
   -np $(printf '%q' "$NPROC") \\
   -se $(printf '%q' "$sample_embedding_path") \\
   -be $(printf '%q' "$background_embedding_path") \\
-  --cluster-algo vdbscan \\
-  -kn $(printf '%q' "$K_NEIGHBORS") \\
-  -ms $(printf '%q' "$CLUSTER_MIN_SAMPLES") \\
-  -ekn $(printf '%q' "$EPS_K_NEIGHBORS") \\
-  --eps-estimation-based-on $(printf '%q' "$EPS_ESTIMATION_BASED_ON") \\
-  --vdbscan-sym-rule $(printf '%q' "$VDBSCAN_SYM_RULE")
+  ${cluster_args_escaped}
 
 cp -f $(printf '%q' "$run_dir/${prefix}_tcremp_clusters.tsv") $(printf '%q' "$OUT_DIR/")
 cp -f $(printf '%q' "$run_dir/${prefix}_summary_tcrempnet.tsv") $(printf '%q' "$OUT_DIR/")
