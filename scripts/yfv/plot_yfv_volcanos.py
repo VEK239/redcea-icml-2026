@@ -66,6 +66,11 @@ def parse_args() -> argparse.Namespace:
         default="yfv_",
         help="Only process summary files whose basename starts with this prefix.",
     )
+    parser.add_argument(
+        "--method",
+        choices=KNOWN_METHODS,
+        help="Only render volcanoes for the selected clustering method.",
+    )
     return parser.parse_args()
 
 
@@ -297,9 +302,14 @@ def main() -> int:
         for path in input_dir.glob(f"{args.prefix}*{suffix}")
         if path.is_file()
     )
+    if args.method:
+        summary_paths = [path for path in summary_paths if infer_method(path) == args.method]
     if not summary_paths:
         expected = ", ".join(f"{args.prefix}*{suffix}" for suffix in SUMMARY_SUFFIXES)
-        print(f"No summary files matching [{expected}] were found in {input_dir}")
+        if args.method:
+            print(f"No {args.method} summary files matching [{expected}] were found in {input_dir}")
+        else:
+            print(f"No summary files matching [{expected}] were found in {input_dir}")
         return 1
 
     output_dir.mkdir(parents=True, exist_ok=True)

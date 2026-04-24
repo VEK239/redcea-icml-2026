@@ -48,6 +48,11 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--method",
+        choices=("dbscan", "leiden", "vdbscan"),
+        help="Only import files detected as belonging to the selected clustering method.",
+    )
+    parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Overwrite destination files if they already exist and differ.",
@@ -129,6 +134,8 @@ def main() -> int:
 
     for src in files:
         method = detect_method_from_name(src.name, default_method=args.default_method)
+        if args.method and method != args.method:
+            continue
         message = copy_file(src, dest, overwrite=args.overwrite, default_method=args.default_method)
         print(message)
         methods_seen[method] = methods_seen.get(method, 0) + 1
@@ -136,6 +143,13 @@ def main() -> int:
             copied += 1
         else:
             skipped += 1
+
+    if not methods_seen:
+        print(
+            "No matching YFV RedCEA result files were found after method filtering. "
+            f"Requested method: {args.method!r}."
+        )
+        return 1
 
     print()
     method_summary = ", ".join(f"{method}={count}" for method, count in sorted(methods_seen.items()))
