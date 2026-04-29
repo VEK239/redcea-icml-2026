@@ -22,13 +22,14 @@ CLONOTYPES_SUFFIXES = (
     "_enriched_clonotypes_tcremp.tsv.gz",
 )
 KNOWN_METHODS = ("dbscan", "leiden", "vdbscan")
+AMINO_ACIDS = "ACDEFGHIKLMNPQRSTVWY"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Reproduce YFV volcano plots from RedCEA summary tables and optionally "
-            "highlight clusters with exact YFV VDJdb clonotype matches."
+            "highlight clusters with YFV VDJdb clonotype matches within one mismatch."
         )
     )
     parser.add_argument(
@@ -138,6 +139,35 @@ def resolve_cdr3_column(df: pd.DataFrame) -> str | None:
     return None
 
 
+def normalize_cdr3(series: pd.Series) -> pd.Series:
+    return series.fillna("").astype(str).str.strip().str.upper()
+
+
+def build_variant_index(clonotypes: set[str]) -> dict[int, set[str]]:
+    by_length: dict[int, set[str]] = {}
+    for clonotype in clonotypes:
+        if clonotype:
+            by_length.setdefault(len(clonotype), set()).add(clonotype)
+    return by_length
+
+
+def contains_with_hamming_leq_one(query: str, target_index: dict[int, set[str]]) -> bool:
+    candidates = target_index.get(len(query))
+    if not candidates:
+        return False
+    if query in candidates:
+        return True
+
+    for pos, original in enumerate(query):
+        for aa in AMINO_ACIDS:
+            if aa == original:
+                continue
+            variant = query[:pos] + aa + query[pos + 1 :]
+            if variant in candidates:
+                return True
+    return False
+
+
 def annotate_with_vdjdb(summary_df: pd.DataFrame, clonotypes_path: Path, yfv_cdr3s: set[str]) -> pd.DataFrame:
     annotated = summary_df.copy()
     annotated["vdjdb"] = False
@@ -153,14 +183,8 @@ def annotate_with_vdjdb(summary_df: pd.DataFrame, clonotypes_path: Path, yfv_cdr
     if cdr3_col is None:
         return annotated
 
-    matches = (
-        clonotypes[cdr3_col]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .str.upper()
-        .isin(yfv_cdr3s)
-    )
+    yfv_index = build_variant_index(yfv_cdr3s)
+    matches = normalize_cdr3(clonotypes[cdr3_col]).map(lambda cdr3: cdr3 != "" and contains_with_hamming_leq_one(cdr3, yfv_index))
     matched_clusters = set(clonotypes.loc[matches, "cluster_id"].tolist())
     annotated["vdjdb"] = annotated["cluster_id"].isin(matched_clusters)
     return annotated

@@ -10,6 +10,7 @@ import pandas as pd
 SUMMARY_SUFFIX = "_summary_tcrempnet.tsv"
 CLUSTERS_SUFFIX = "_tcremp_clusters.tsv"
 ENRICHED_SUFFIX = "_enriched_clonotypes_tcremp.tsv"
+AMINO_ACIDS = "ACDEFGHIKLMNPQRSTVWY"
 LEIDEN_RUN_RE = re.compile(
     r"^yfv_(?P<donor>[A-Z]\d+)_(?P<replica>F\d+)_leiden_"
     r"k(?P<k_neighbors>\d+)_res(?P<resolution>[A-Za-z0-9p.-]+)_min(?P<min_samples>\d+)$"
@@ -109,6 +110,35 @@ def resolve_cdr3_column(df: pd.DataFrame) -> str:
     raise ValueError(f"Could not find a CDR3 column among {CDR3_CANDIDATES}")
 
 
+def normalize_cdr3(series: pd.Series) -> pd.Series:
+    return series.fillna("").astype(str).str.strip().str.upper()
+
+
+def build_variant_index(clonotypes: set[str]) -> dict[int, set[str]]:
+    by_length: dict[int, set[str]] = {}
+    for clonotype in clonotypes:
+        if clonotype:
+            by_length.setdefault(len(clonotype), set()).add(clonotype)
+    return by_length
+
+
+def contains_with_hamming_leq_one(query: str, target_index: dict[int, set[str]]) -> bool:
+    candidates = target_index.get(len(query))
+    if not candidates:
+        return False
+    if query in candidates:
+        return True
+
+    for pos, original in enumerate(query):
+        for aa in AMINO_ACIDS:
+            if aa == original:
+                continue
+            variant = query[:pos] + aa + query[pos + 1 :]
+            if variant in candidates:
+                return True
+    return False
+
+
 def parse_resolution(tag: str) -> float:
     return float(tag.replace("p", "."))
 
@@ -185,7 +215,7 @@ def load_llw_vdjdb(vdjdb_path: Path, *, epitope: str, species: str) -> pd.DataFr
     if llw.empty:
         raise ValueError(f"No VDJdb TRB rows found for antigen.epitope={epitope!r}, antigen.species={species!r}")
 
-    llw["cdr3_norm"] = llw["cdr3"].fillna("").astype(str).str.strip().str.upper()
+    llw["cdr3_norm"] = normalize_cdr3(llw["cdr3"])
     llw["v_norm"] = normalize_segment(llw["v.segm"])
     llw["j_norm"] = normalize_segment(llw["j.segm"])
     return llw
@@ -258,13 +288,24 @@ def summarize_run(
     summary_df["cluster_id"] = summary_df["cluster_id"].astype(str)
     clusters_df["cluster_id"] = clusters_df["cluster_id"].astype(str)
     enriched_df["cluster_id"] = enriched_df["cluster_id"].astype(str)
-    clusters_df["cdr3_norm"] = clusters_df[cdr3_clusters].fillna("").astype(str).str.strip().str.upper()
-    enriched_df["cdr3_norm"] = enriched_df[cdr3_enriched].fillna("").astype(str).str.strip().str.upper()
+    clusters_df["cdr3_norm"] = normalize_cdr3(clusters_df[cdr3_clusters])
+    enriched_df["cdr3_norm"] = normalize_cdr3(enriched_df[cdr3_enriched])
 
-    llw_cdr3s = set(llw_vdjdb["cdr3_norm"])
-    matched_cluster_rows = clusters_df[clusters_df["cdr3_norm"].isin(llw_cdr3s)].copy()
+    llw_cdr3s = {cdr3 for cdr3 in llw_vdjdb["cdr3_norm"] if cdr3}
+    llw_index = build_variant_index(llw_cdr3s)
+    matched_cluster_rows = clusters_df[
+        clusters_df["cdr3_norm"].ne("")
+        & clusters_df["cdr3_norm"].map(lambda cdr3: contains_with_hamming_leq_one(cdr3, llw_index))
+    ].copy()
     matched_clusters = set(matched_cluster_rows["cluster_id"])
-    matched_enriched_rows = enriched_df[enriched_df["cdr3_norm"].isin(llw_cdr3s)].copy()
+    matched_enriched_rows = enriched_df[
+        enriched_df["cdr3_norm"].ne("")
+        & enriched_df["cdr3_norm"].map(lambda cdr3: contains_with_hamming_leq_one(cdr3, llw_index))
+    ].copy()
+    enriched_match_index = build_variant_index(set(matched_enriched_rows["cdr3_norm"]))
+    n_llw_vdjdb_trb_clonotypes_found_in_enriched = sum(
+        1 for cdr3 in llw_cdr3s if contains_with_hamming_leq_one(cdr3, enriched_match_index)
+    )
 
     vdjdb_cluster_summary = summary_df[summary_df["cluster_id"].isin(matched_clusters)].copy()
     vdjdb_cluster_summary["zone"] = [
@@ -287,7 +328,7 @@ def summarize_run(
             ((summary_df["enrichment_fdr_zbinom"] < fdr_threshold) & (summary_df["log_fold_change"] > 0)).sum()
         ),
         "n_llw_vdjdb_trb_clonotypes_total": int(len(llw_cdr3s)),
-        "n_llw_vdjdb_trb_clonotypes_found_in_enriched": int(matched_enriched_rows["cdr3_norm"].nunique()),
+        "n_llw_vdjdb_trb_clonotypes_found_in_enriched": int(n_llw_vdjdb_trb_clonotypes_found_in_enriched),
         "n_llw_vdjdb_trb_enriched_rows": int(len(matched_enriched_rows)),
         "n_llw_vdjdb_clusters": int(len(matched_clusters)),
         "mean_log_fold_change_all_clusters": float(summary_df["log_fold_change"].mean()),
