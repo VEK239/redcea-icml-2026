@@ -56,10 +56,6 @@ for query in "${samples[@]}"; do
 
 set -euo pipefail
 
-# shellcheck disable=SC1091
-source "\$(conda info --base)/etc/profile.d/conda.sh"
-conda activate $(printf '%q' "$ENV_NAME")
-
 mkdir -p $(printf '%q' "$MATCHES_DIR")
 vdjmatch2 $(printf '%q' "$query") $(printf '%q' "$target") \\
   --out $(printf '%q' "$out_file") \\
