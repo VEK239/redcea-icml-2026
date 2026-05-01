@@ -48,7 +48,7 @@ def load_input_metadata(input_dir: Path, sample_pattern: str, chain: str) -> pd.
     records: list[dict[str, object]] = []
     for sample_path in sorted(input_dir.glob(sample_pattern)):
         sample_id = sample_id_from_path(sample_path)
-        df = pd.read_csv(sample_path, sep="\t", usecols=["clone_id", "locus"])
+        df = pd.read_csv(sample_path, sep="\t", usecols=["locus"])
         n_rows = int(df["locus"].fillna("").astype(str).str.strip().str.lower().eq(chain.lower()).sum())
         records.append(
             {
@@ -63,15 +63,15 @@ def load_input_metadata(input_dir: Path, sample_pattern: str, chain: str) -> pd.
     return pd.DataFrame.from_records(records).sort_values("sample_id").reset_index(drop=True)
 
 
-def pick_clone_id_column(columns: list[str], side: str) -> str:
+def pick_row_column(columns: list[str], side: str) -> str:
+    expected = f"{side}_row"
     for column in columns:
-        name = column.lower()
-        if side in name and "clone_id" in name:
+        if column.lower() == expected:
             return column
-    raise ValueError(f"Could not find {side} clone_id column in vdjmatch2 output: {columns}")
+    raise ValueError(f"Could not find {expected} column in vdjmatch2 output: {columns}")
 
 
-def count_unique_query_clone_ids(match_path: Path) -> tuple[int, int]:
+def count_unique_query_rows(match_path: Path) -> tuple[int, int]:
     try:
         df = pd.read_csv(match_path, sep="\t")
     except pd.errors.EmptyDataError:
@@ -79,19 +79,19 @@ def count_unique_query_clone_ids(match_path: Path) -> tuple[int, int]:
     if df.empty:
         return 0, 0
 
-    query_col = pick_clone_id_column(list(df.columns), "query")
-    target_col = pick_clone_id_column(list(df.columns), "target")
+    query_col = pick_row_column(list(df.columns), "query")
+    target_col = pick_row_column(list(df.columns), "target")
 
     pairs = (
         df[[query_col, target_col]]
         .fillna("")
         .astype(str)
-        .rename(columns={query_col: "query_clone_id", target_col: "target_clone_id"})
+        .rename(columns={query_col: "query_row", target_col: "target_row"})
     )
     pairs = pairs.loc[
-        pairs["query_clone_id"].str.strip().ne("") & pairs["target_clone_id"].str.strip().ne("")
+        pairs["query_row"].str.strip().ne("") & pairs["target_row"].str.strip().ne("")
     ].drop_duplicates()
-    return int(pairs["query_clone_id"].nunique()), int(len(pairs))
+    return int(pairs["query_row"].nunique()), int(len(pairs))
 
 
 def build_pairwise_table(metadata: pd.DataFrame, matches_dir: Path) -> pd.DataFrame:
@@ -108,7 +108,7 @@ def build_pairwise_table(metadata: pd.DataFrame, matches_dir: Path) -> pd.DataFr
                 n_pairs = n_x
             else:
                 match_path = matches_dir / f"{sample_x}__vs__{sample_y}.tsv"
-                n_matched, n_pairs = count_unique_query_clone_ids(match_path)
+                n_matched, n_pairs = count_unique_query_rows(match_path)
 
             records.append(
                 {
@@ -118,7 +118,7 @@ def build_pairwise_table(metadata: pd.DataFrame, matches_dir: Path) -> pd.DataFr
                     "donor_y": donor_id_from_sample_id(sample_y),
                     "n_input_rows_x": n_x,
                     "n_input_rows_y": n_y,
-                    "n_matched_clone_ids_x_in_y": n_matched,
+                    "n_matched_query_rows_x_in_y": n_matched,
                     "n_unique_query_target_pairs": n_pairs,
                     "share_x_in_y": (n_matched / n_x) if n_x else 0.0,
                 }
