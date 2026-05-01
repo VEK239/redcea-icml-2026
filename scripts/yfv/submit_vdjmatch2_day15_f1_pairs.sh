@@ -59,10 +59,10 @@ set -euo pipefail
 mkdir -p $(printf '%q' "$MATCHES_DIR")
 vdjmatch2 $(printf '%q' "$query") $(printf '%q' "$target") \\
   --out $(printf '%q' "$out_file") \\
-  --max-sub 1 \\
+  --max-sub 0 \\
   --max-ins 0 \\
   --max-del 0 \\
-  --max-edits 1 \\
+  --max-edits 0 \\
   --threads $(printf '%q' "$THREADS") \\
   --junction-col junction_aa \\
   --chain-col locus \\

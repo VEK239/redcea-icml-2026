@@ -1,0 +1,7 @@
+sample_id	donor	sample_path	n_input_rows
+P1_15_F1	P1	/projects/immunestatus/pogorelyy/airr_format/P1_15_F1.txt	311112
+P2_15_F1	P2	/projects/immunestatus/pogorelyy/airr_format/P2_15_F1.txt	362331
+Q1_15_F1	Q1	/projects/immunestatus/pogorelyy/airr_format/Q1_15_F1.txt	86750
+Q2_15_F1	Q2	/projects/immunestatus/pogorelyy/airr_format/Q2_15_F1.txt	205818
+S1_15_F1	S1	/projects/immunestatus/pogorelyy/airr_format/S1_15_F1.txt	139748
+S2_15_F1	S2	/projects/immunestatus/pogorelyy/airr_format/S2_15_F1.txt	276172
